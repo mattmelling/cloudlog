@@ -60,10 +60,12 @@
           services.cloudlog = {
             enable = true;
             lotwsync.enable = true;
+            lotwusers.enable = true;
           };
         };
         testScript = ''
           machine.wait_for_unit('cloudlog-lotwsync.timer')
+          machine.wait_for_unit('cloudlog-lotwusers.timer')
         '';
       };
     };
@@ -99,6 +101,8 @@
             <?php
             defined('BASEPATH') OR exit('No direct script access allowed');
             ${cfgOptions}
+            $config['auth_level'][3] = "Operator";
+            $config['auth_level'][99] = "Administrator";
             date_default_timezone_set($config['time_reference']);
           '';
           databaseFile = let
@@ -137,7 +141,7 @@
           defaultConfig = {
             app_name = "Cloudlog";
             app_version = "1.7";
-            directory = "logbook";
+            directory = "";
             callbook = "hamqth";
             table_name = "TABLE_HRD_CONTACTS_V01";
             locator = "";
@@ -215,10 +219,17 @@
               cp -r * $out/
               ln -s ${configFile} $out/application/config/config.php
               ln -s ${databaseFile} $out/application/config/database.php
-              rm -rf $out/{updates,uploads}
+
+              rm -rf $out/{updates,uploads,backup,logbook}
               ln -s ${cfg.dataDir}/updates $out/updates
               ln -s ${cfg.dataDir}/uploads $out/uploads
-              #rm -rf $out/install
+              ln -s ${cfg.dataDir}/backup $out/backup
+              ln -s ${cfg.dataDir}/logbook $out/logbook
+
+              rm -f $out/assets/json/{dok,sota,wwff}.txt
+              ln -s ${cfg.dataDir}/assets/json/dok.txt $out/assets/json/dok.txt
+              ln -s ${cfg.dataDir}/assets/json/sota.txt $out/assets/json/sota.txt
+              ln -s ${cfg.dataDir}/assets/json/wwff.txt $out/assets/json/wwff.txt
             '';
           };
         in {
@@ -310,21 +321,8 @@
                 default = null;
               };
             };
-            lotwsync = {
-              enable = lib.mkEnableOption "cloudlog-lotwsync";
-              schedule = lib.mkOption {
-                type = types.str;
-                default = "*-*-* 00/3:00:00";
-                description = "systemd-timer schedule for the synchronisation task.";
-              };
-            };
           };
           config = mkIf cfg.enable {
-            systemd.tmpfiles.rules = [
-              "d '${cfg.dataDir}/updates' 0770 ${cfg.user} ${cfg.group} - -"
-              "d '${cfg.dataDir}/uploads' 0770 ${cfg.user} ${cfg.group} - -"
-              "d '${cfg.dataDir}/backup' 0770 ${cfg.user} ${cfg.group} - -"
-            ];
             services.phpfpm = {
               phpPackage = pkgs.php74;
               pools = {
@@ -377,6 +375,12 @@
             };
             systemd = {
               services = {
+                phpfpm-cloudlog = {
+                  preStart = ''
+                    mkdir -p ${cfg.dataDir}/{backup,updates,uploads,assets/json,logbook/uploads}
+                    chown -R ${cfg.user}:users ${cfg.dataDir}
+                  '';
+                };
                 cloudlog-create-database = mkIf cfg.mysql.enable {
                   description = "Set up cloudlog database";
                   serviceConfig = {
@@ -388,27 +392,109 @@
                   script = let
                     mysql = "${config.services.mysql.package}/bin/mysql";
                   in ''
-                  if [ $(echo "show tables;" | ${mysql} ${cfg.mysql.database} | grep options | wc -l) -eq 0 ]; then
-                     echo "Initialising Cloudlog database..."
-                     ${mysql} ${cfg.mysql.database} < ${cfg.package}/install/assets/install.sql
-                  fi
-              '';
+                    if [ $(echo "show tables;" | ${mysql} ${cfg.mysql.database} | grep options | wc -l) -eq 0 ]; then
+                       echo "Initialising Cloudlog database..."
+                       ${mysql} ${cfg.mysql.database} < ${cfg.package}/install/assets/install.sql
+                    fi
+                  '';
                 };
-                cloudlog-lotwsync = lib.mkIf cfg.lotwsync.enable {
-                  description = "cloudlog lotw sync";
+                cloudlog-lotw-upload = {
+                  description = "Upload QSOs to LoTW if certs have been provided";
                   enable = true;
-                  serviceConfig = {
-                    ExecStart = "${pkgs.curl}/bin/curl -s ${cfg.config.base_url}/lotw/lotw_upload";
-                  };
+                  script = "${pkgs.curl}/bin/curl -s ${cfg.config.base_url}/lotw/lotw_upload";
+                };
+                cloudlog-lotw-users-update = {
+                  description = "Update LOTW Users Database";
+                  enable = true;
+                  script = "${pkgs.curl}/bin/curl -s ${cfg.config.base_url}/lotw/load_users";
+                };
+                cloudlog-dok-update = {
+                  description = "Update DOK File for autocomplete";
+                  enable = true;
+                  script = "${pkgs.curl}/bin/curl -s ${cfg.config.base_url}/update/update_dok";
+                };
+                cloudlog-clublog-scp-update = {
+                  description = "Update Clublog SCP Database File";
+                  enable = true;
+                  script = "${pkgs.curl}/bin/curl -s ${cfg.config.base_url}/update/update_clublog_scp";
+                };
+                cloudlog-wwff-update = {
+                  description = "Update WWFF File for autocomplete";
+                  enable = true;
+                  script = "${pkgs.curl}/bin/curl -s ${cfg.config.base_url}/update/update_wwff";
+                };
+                cloudlog-qrz-upload = {
+                  description = "Upload QSOs to QRZ Logbook";
+                  enable = true;
+                  script = "${pkgs.curl}/bin/curl -s ${cfg.config.base_url}/qrz/upload";
+                };
+                cloudlog-sota-update = {
+                  description = "Update SOTA File for autocomplete";
+                  enable = true;
+                  script = "${pkgs.curl}/bin/curl -s ${cfg.config.base_url}/update/update_sota";
                 };
               };
               timers = {
-                cloudlog-lotwsync = lib.mkIf cfg.lotwsync.enable {
+                cloudlog-lotw-upload = {
                   enable = true;
                   wantedBy = [ "timers.target" ];
-                  partOf = [ "cloudlog-lotwsync.service" ];
+                  partOf = [ "cloudlog-lotw-upload.service" ];
                   timerConfig = {
-                    OnCalendar = cfg.lotwsync.schedule;
+                    OnCalendar = "daily";
+                    Persistent = true;
+                  };
+                };
+                cloudlog-lotw-users-update = {
+                  enable = true;
+                  wantedBy = [ "timers.target" ];
+                  partOf = [ "cloudlog-lotw-users-update.service" ];
+                  timerConfig = {
+                    OnCalendar = "weekly";
+                    Persistent = true;
+                  };
+                };
+                cloudlog-dok-update = {
+                  enable = true;
+                  wantedBy = [ "timers.target" ];
+                  partOf = [ "cloudlog-dok-update.service" ];
+                  timerConfig = {
+                    OnCalendar = "monthly";
+                    Persistent = true;
+                  };
+                };
+                cloudlog-clublog-scp-update = {
+                  enable = true;
+                  wantedBy = [ "timers.target" ];
+                  partOf = [ "cloudlog-clublog-scp-update.service" ];
+                  timerConfig = {
+                    OnCalendar = "monthly";
+                    Persistent = true;
+                  };
+                };
+                cloudlog-wwff-update =  {
+                  enable = true;
+                  wantedBy = [ "timers.target" ];
+                  partOf = [ "cloudlog-wwff-update.service" ];
+                  timerConfig = {
+                    OnCalendar = "monthly";
+                    Persistent = true;
+                  };
+                };
+                cloudlog-qrz-upload = {
+                  enable = true;
+                  wantedBy = [ "timers.target" ];
+                  partOf = [ "cloudlog-wwff-update.service" ];
+                  timerConfig = {
+                    OnCalendar = "monthly";
+                    Persistent = true;
+                  };
+                };
+                cloudlog-sota-update = {
+                  enable = true;
+                  wantedBy = [ "timers.target" ];
+                  partOf = [ "cloudlog-sota-update.service" ];
+                  timerConfig = {
+                    OnCalenar = "monthly";
                     Persistent = true;
                   };
                 };
