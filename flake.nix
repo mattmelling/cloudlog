@@ -324,7 +324,7 @@
           };
           config = mkIf cfg.enable {
             services.phpfpm = {
-              phpPackage = pkgs.php74;
+              phpPackage = pkgs.php81;
               pools = {
                 "${cfg.pool}" = {
                   user = cfg.user;
