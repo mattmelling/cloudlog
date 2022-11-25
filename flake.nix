@@ -1,5 +1,11 @@
 {
   description = "Web based amateur radio logging application built using PHP & MySQL supports general station logging tasks from HF to Microwave with supporting applications to support CAT control.";
+  inputs = {
+    flake-compat = {
+      url = "github:edolstra/flake-compat";
+      flake = false;
+    };
+  };
   outputs = { self, nixpkgs, ... }: {
     packages.x86_64-linux.cloudlog = let
       pkgs = import nixpkgs { system = "x86_64-linux"; };
@@ -15,7 +21,7 @@
     checks.x86_64-linux = let
       system = "x86_64-linux";
       pkgs = import nixpkgs { inherit system; };
-      test = import (nixpkgs + "/nixos/lib/testing-python.nix") {
+      test = import (nixpkgs + /nixos/lib/testing-python.nix) {
         inherit system;
       };
     in {
@@ -59,17 +65,17 @@
           nixpkgs.overlays = [ self.overlays.default ];
           services.cloudlog = {
             enable = true;
-            lotwsync.enable = true;
-            lotwusers.enable = true;
           };
         };
         testScript = ''
-          machine.wait_for_unit('cloudlog-lotwsync.timer')
-          machine.wait_for_unit('cloudlog-lotwusers.timer')
+          machine.wait_for_unit('cloudlog-lotw-upload.timer')
+          machine.wait_for_unit('cloudlog-lotw-users-update.timer')
         '';
       };
     };
-    hydraJobs = { inherit (self) packages checks; };
+    hydraJobs = {
+      inherit (self) packages checks;
+    };
     overlays.default = (final: prev: {
       cloudlog = self.packages.x86_64-linux.cloudlog;
     });
