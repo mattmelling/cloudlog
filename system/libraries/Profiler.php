@@ -522,7 +522,7 @@ class CI_Profiler {
 
 		foreach ($this->CI->session->userdata() as $key => $val)
 		{
-			$val = $val == null ? "" : $val;
+            $val = $val == null ? "" : $val;
 			$pre       = '';
 			$pre_close = '';
 
