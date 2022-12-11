@@ -55,7 +55,7 @@
           machine.succeed("echo 'use cloudlog_db;' | sudo -u cloudlog mysql")
 
           # ensure the web application is running
-          machine.succeed("curl -s localhost | grep '<title>Dashboard - Cloudlog</title>'")
+          machine.succeed("curl -s -L localhost | grep '<title>Login - Cloudlog</title>'")
         '';
       };
       cloudlog-lotwsync = test.simpleTest {
